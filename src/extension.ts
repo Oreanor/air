@@ -1,4 +1,10 @@
 import * as vscode from 'vscode';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+
+// Загружаем переменные окружения из .env файла
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+
 import { ChatProvider } from './chatProvider';
 import { ChatOrchestrator, HistoryService, TelegramService } from './services';
 import { ChatRequest } from './types';
@@ -34,6 +40,40 @@ export function activate(context: vscode.ExtensionContext) {
     provider.postMessage({ type: 'done', conversationId: 'preview-autofix' });
   });
 
+  preview.subscribeToElementPicks(async (info) => {
+    const summary = `Picked element: \`${info.selector}\`\n` +
+      `Size: ${info.rect.width}×${info.rect.height}\n` +
+      `Font: ${info.styles.fontSize} ${info.styles.fontWeight}\n` +
+      `Color: ${info.styles.color}\n` +
+      `Background: ${info.styles.background}`
+
+    provider.postMessage({
+      type: 'user-message',
+      text: summary,
+      from: 'Preview Picker',
+      conversationId: 'preview',
+    })
+
+    // и сразу спрашиваем агента что с этим сделать
+    const request: ChatRequest = {
+      conversationId: 'preview',
+      messages: [{
+        id: `pick-${Date.now()}`,
+        role: 'user',
+        content: `Пользователь выбрал элемент в preview:\n${summary}\n\nЧто можно улучшить?`,
+        createdAt: Date.now(),
+      }],
+      context: { taskKind: 'agent' },
+      modelId: 'default',
+    }
+
+    provider.postMessage({ type: 'stream-start', conversationId: 'preview' })
+    await orchestrator.streamChatResponse(request, delta => {
+      provider.postMessage({ type: 'delta', delta, conversationId: 'preview' })
+    })
+    provider.postMessage({ type: 'done', conversationId: 'preview' })
+  });
+
   // команды
   context.subscriptions.push(
     vscode.commands.registerCommand('air.openPreview', () => preview.open()),
@@ -44,39 +84,46 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidSaveTextDocument(() => preview.reload())
   );
 
-  // --- Инициализация Telegram ---
-  const tgToken = "8613037275:AAGNx6adhzaI5KQniIVcAyecertoiIyOd7g";
-  const tgChatId = "377029435";
+    // --- Инициализация Telegram ---
+  const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+  const tgChatId = process.env.TELEGRAM_CHAT_ID;
 
   if (tgToken && tgChatId) {
     const telegram = new TelegramService(tgToken, tgChatId);
 
     telegram.startPolling(async (text, from) => {
-      // 1. Создаем запрос для оркестратора
-      const request: ChatRequest = {
-        conversationId: `tg-${tgChatId}`,
-        messages: [
-          { id: `tg-${Date.now()}`, role: 'user', content: text, createdAt: Date.now() }
-        ],
-        context: orchestrator.buildChatContext(),
-        modelId: 'default'
-      };
+    const request: ChatRequest = {
+      conversationId: `tg-${tgChatId}`,
+      messages: [
+        { id: `tg-${Date.now()}`, role: 'user', content: text, createdAt: Date.now() }
+      ],
+      context: orchestrator.buildChatContext(),
+      modelId: 'default'
+    };
 
-      let fullResponse = '';
-
-      // 2. Стримим ответ от LLM
-      await orchestrator.streamChatResponse(request, (delta) => {
-        fullResponse += delta;
-        // Можно также транслировать в Webview, если он открыт
-        provider.postMessage({ type: 'delta', delta, conversationId: request.conversationId });
-      });
-
-      // 3. Отправляем финальный результат обратно в Telegram
-      if (fullResponse) {
-        await telegram.send(fullResponse);
-      }
-      provider.postMessage({ type: 'done', conversationId: request.conversationId });
+    // ← вот это добавь: сначала показываем user реплику в UI
+    provider.postMessage({
+      type: 'user-message',
+      text,
+      from,
+      conversationId: request.conversationId
     });
+
+    let fullResponse = '';
+
+    provider.postMessage({ type: 'stream-start', conversationId: request.conversationId });
+
+    await orchestrator.streamChatResponse(request, (delta) => {
+      fullResponse += delta;
+      provider.postMessage({ type: 'delta', delta, conversationId: request.conversationId });
+    });
+
+    provider.postMessage({ type: 'done', conversationId: request.conversationId });
+
+    if (fullResponse) {
+      await telegram.send(fullResponse);
+    }
+  });
 
     context.subscriptions.push({ dispose: () => telegram.stopPolling() });
   }

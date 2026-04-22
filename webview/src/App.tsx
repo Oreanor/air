@@ -7,19 +7,22 @@ declare const acquireVsCodeApi: () => {
 const vscode = acquireVsCodeApi()
 
 interface Message {
+  id: string
   role: 'user' | 'assistant'
   text: string
+  source?: 'telegram'
 }
+
+const STREAMING_ID = '__streaming__'
 
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
+  const [isStreaming, setIsStreaming] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const openPreview = () => vscode.postMessage({ type: 'command', command: 'air.openPreview' })
-  const pickElement = () => vscode.postMessage({ type: 'command', command: 'air.pickElement' })
-
-
+  const pickElement  = () => vscode.postMessage({ type: 'command', command: 'air.pickElement' })
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
@@ -27,59 +30,103 @@ export default function App() {
       if (!msg || typeof msg !== 'object') return
 
       switch (msg.type) {
+
+        // ── история при открытии панели ───────────────────────────────
         case 'history': {
-          const msgs = Array.isArray(msg.messages)
-            ? msg.messages.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', text: m.content }))
+          const msgs: Message[] = Array.isArray(msg.messages)
+            ? msg.messages.map((m: any, i: number) => ({
+                id: `hist-${i}`,
+                role: m.role === 'assistant' ? 'assistant' : 'user',
+                text: m.content ?? '',
+              }))
             : []
-          setMessages(msgs as Message[])
+          setMessages(msgs)
           break
         }
+
+        // ── входящее из Telegram — показываем как user реплику ────────
+        case 'user-message': {
+          setMessages(prev => [
+            ...prev,
+            {
+              id: `tg-user-${Date.now()}`,
+              role: 'user',
+              text: msg.text ?? '',
+              source: 'telegram',
+            },
+            {
+              id: STREAMING_ID,
+              role: 'assistant',
+              text: '',
+            },
+          ])
+          setIsStreaming(true)
+          break
+        }
+
+        // ── начало стриминга из чата расширения ───────────────────────
         case 'stream-start': {
-          // start a new assistant placeholder
-          setMessages(prev => [...prev, { role: 'assistant', text: '' }])
+          setMessages(prev => {
+            // не дублируем если уже есть streaming placeholder
+            if (prev.some(m => m.id === STREAMING_ID)) return prev
+            return [...prev, { id: STREAMING_ID, role: 'assistant', text: '' }]
+          })
+          setIsStreaming(true)
           break
         }
+
+        // ── токен стриминга ───────────────────────────────────────────
         case 'delta': {
           const delta = String(msg.delta ?? '')
-          setMessages(prev => {
-            if (prev.length === 0) return prev
-            const last = prev[prev.length - 1]
-            if (last.role === 'assistant') {
-              const updated = [...prev]
-              updated[updated.length - 1] = { ...last, text: last.text + delta }
-              return updated
-            }
-            // if last is user, append new assistant message
-            return [...prev, { role: 'assistant', text: delta }]
-          })
+          setMessages(prev => prev.map(m =>
+            m.id === STREAMING_ID ? { ...m, text: m.text + delta } : m
+          ))
           break
         }
+
+        // ── стриминг завершён ─────────────────────────────────────────
         case 'done': {
-          // no-op for now; final 'response' will be sent separately
+          setMessages(prev => prev.map(m =>
+            m.id === STREAMING_ID ? { ...m, id: `msg-${Date.now()}` } : m
+          ))
+          setIsStreaming(false)
           break
         }
+
+        // ── финальный ответ (если стриминг не использовался) ─────────
         case 'response': {
           const text = String(msg.text ?? '')
           setMessages(prev => {
-            // if last message is assistant, replace it with final response
-            if (prev.length > 0 && prev[prev.length - 1].role === 'assistant') {
+            // заменяем streaming placeholder или последний assistant
+            const idx = prev.findIndex(m => m.id === STREAMING_ID)
+            if (idx !== -1) {
               const updated = [...prev]
-              updated[updated.length - 1] = { role: 'assistant', text }
+              updated[idx] = { id: `msg-${Date.now()}`, role: 'assistant', text }
               return updated
             }
-            return [...prev, { role: 'assistant', text }]
+            // если streaming placeholder нет — добавляем новое
+            return [...prev, { id: `msg-${Date.now()}`, role: 'assistant', text }]
           })
+          setIsStreaming(false)
           break
         }
+
         case 'error': {
-          const text = String(msg.error ?? 'error')
-          setMessages(prev => [...prev, { role: 'assistant', text }])
+          setMessages(prev => {
+            // убираем streaming placeholder если был
+            const filtered = prev.filter(m => m.id !== STREAMING_ID)
+            return [...filtered, {
+              id: `err-${Date.now()}`,
+              role: 'assistant',
+              text: `⚠ ${msg.error ?? 'Ошибка'}`,
+            }]
+          })
+          setIsStreaming(false)
           break
         }
-        default:
-          break
       }
     }
+
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
   }, [])
@@ -89,9 +136,15 @@ export default function App() {
   }, [messages])
 
   const send = () => {
-    if (!input.trim()) return
-    setMessages(prev => [...prev, { role: 'user', text: input }])
-    vscode.postMessage({ type: 'send', text: input })
+    if (!input.trim() || isStreaming) return
+    const text = input.trim()
+    setMessages(prev => [
+      ...prev,
+      { id: `user-${Date.now()}`, role: 'user', text },
+      { id: STREAMING_ID, role: 'assistant', text: '' },
+    ])
+    setIsStreaming(true)
+    vscode.postMessage({ type: 'send', text })
     setInput('')
   }
 
@@ -105,27 +158,41 @@ export default function App() {
   return (
     <div style={styles.root}>
       <div style={styles.messages}>
-        {messages.map((m, i) => (
-          <div key={i} style={m.role === 'user' ? styles.user : styles.assistant}>
-            {m.text}
+        {messages.map(m => (
+          <div key={m.id} style={
+            m.role === 'user'
+              ? { ...styles.bubble, ...styles.user, ...(m.source === 'telegram' ? styles.telegramUser : {}) }
+              : { ...styles.bubble, ...styles.assistant }
+          }>
+            {m.source === 'telegram' && (
+              <div style={styles.telegramBadge}>📱 Telegram</div>
+            )}
+            <span style={m.id === STREAMING_ID ? styles.streaming : undefined}>
+              {m.text}
+              {m.id === STREAMING_ID && <span style={styles.cursor}>▋</span>}
+            </span>
           </div>
         ))}
         <div ref={bottomRef} />
       </div>
+
       <div style={styles.inputRow}>
         <textarea
-          style={styles.textarea}
+          style={{ ...styles.textarea, opacity: isStreaming ? 0.6 : 1 }}
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Напиши сообщение... (Enter — отправить)"
+          placeholder={isStreaming ? 'Ожидание ответа...' : 'Напиши сообщение... (Enter — отправить)'}
           rows={3}
+          disabled={isStreaming}
         />
-        <button style={styles.button} onClick={send}>
-          Send
-        </button>
-        <button style={styles.iconButton} onClick={openPreview} title="Open Preview">⬡</button>
-        <button style={styles.iconButton} onClick={pickElement} title="Pick Element">⊕</button>
+        <div style={styles.buttons}>
+          <button style={styles.sendButton} onClick={send} disabled={isStreaming}>
+            {isStreaming ? '...' : 'Send'}
+          </button>
+          <button style={styles.iconButton} onClick={openPreview} title="Open Preview">⬡</button>
+          <button style={styles.iconButton} onClick={pickElement}  title="Pick Element">⊕</button>
+        </div>
       </div>
     </div>
   )
@@ -149,29 +216,48 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap: 8,
   },
+  bubble: {
+    borderRadius: 8,
+    padding: '6px 10px',
+    maxWidth: '82%',
+    wordBreak: 'break-word',
+    lineHeight: 1.5,
+  },
   user: {
     alignSelf: 'flex-end',
     background: 'var(--vscode-button-background)',
     color: 'var(--vscode-button-foreground)',
-    borderRadius: 8,
-    padding: '6px 10px',
-    maxWidth: '80%',
   },
   assistant: {
     alignSelf: 'flex-start',
     background: 'var(--vscode-editor-inactiveSelectionBackground)',
-    borderRadius: 8,
-    padding: '6px 10px',
-    maxWidth: '80%',
+  },
+  telegramUser: {
+    background: 'var(--vscode-activityBarBadge-background)',
+    color: 'var(--vscode-activityBarBadge-foreground)',
+  },
+  telegramBadge: {
+    fontSize: '10px',
+    opacity: 0.7,
+    marginBottom: 2,
+  },
+  streaming: {
+    opacity: 0.9,
+  },
+  cursor: {
+    animation: 'none',
+    opacity: 0.7,
+    marginLeft: 1,
   },
   inputRow: {
     display: 'flex',
+    flexDirection: 'column',
     gap: 6,
     padding: 8,
     borderTop: '1px solid var(--vscode-panel-border)',
   },
   textarea: {
-    flex: 1,
+    width: '100%',
     background: 'var(--vscode-input-background)',
     color: 'var(--vscode-input-foreground)',
     border: '1px solid var(--vscode-input-border)',
@@ -180,13 +266,28 @@ const styles: Record<string, React.CSSProperties> = {
     resize: 'none',
     fontFamily: 'inherit',
     fontSize: 'inherit',
+    boxSizing: 'border-box',
   },
-  button: {
+  buttons: {
+    display: 'flex',
+    gap: 6,
+  },
+  sendButton: {
+    flex: 1,
     background: 'var(--vscode-button-background)',
     color: 'var(--vscode-button-foreground)',
     border: 'none',
     borderRadius: 4,
-    padding: '0 12px',
+    padding: '4px 12px',
     cursor: 'pointer',
+  },
+  iconButton: {
+    background: 'var(--vscode-button-secondaryBackground)',
+    color: 'var(--vscode-button-secondaryForeground)',
+    border: 'none',
+    borderRadius: 4,
+    padding: '4px 8px',
+    cursor: 'pointer',
+    fontSize: 14,
   },
 }

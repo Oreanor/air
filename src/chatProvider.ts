@@ -76,20 +76,6 @@ export class ChatProvider implements vscode.WebviewViewProvider {
             });
             this._view?.webview.postMessage({ type: 'done', conversationId: request.conversationId });
 
-            // after streaming finished, send assembled assistant text as a single 'response' so the UI (which listens for 'response') can display it
-            try {
-              if (this.orchestrator && typeof (this.orchestrator as any).getHistory === 'function') {
-                const hist = (this.orchestrator as any).getHistory(request.conversationId ?? 'default');
-                if (Array.isArray(hist)) {
-                  const lastAssistant = [...hist].reverse().find((m: any) => m.role === 'assistant');
-                  if (lastAssistant) {
-                    this._view?.webview.postMessage({ type: 'response', text: lastAssistant.content, conversationId: request.conversationId });
-                  }
-                }
-              }
-            } catch (e) {
-              // ignore
-            }
             console.log('[air] ChatProvider: stream finished', request.conversationId);
           } else {
             this._view?.webview.postMessage({ type: 'response', text: `Ты написал: ${msg.text ?? JSON.stringify(msg.payload)}` });
