@@ -72,14 +72,14 @@ export class TelegramService {
           },
         },
         (res) => {
-          let data = ''
+          let data = '';
           res.on('data', (chunk) => (data += chunk));
           res.on('end', () => resolve(JSON.parse(data)));
         }
-      )
+      );
       req.on('error', reject);
       req.write(payload);
       req.end();
-    })
+    });
   }
 }
