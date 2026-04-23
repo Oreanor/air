@@ -8,6 +8,7 @@ import QuickPrompts from './components/QuickPrompts'
 import NpmPanel from './components/NpmPanel'
 import GitPanel from './components/GitPanel'
 import ElementChip from './components/ElementChip'
+import ScheduleCalendar from './components/ScheduleCalendar'
 
 declare const acquireVsCodeApi: () => { postMessage: (msg: unknown) => void }
 const vscode = acquireVsCodeApi()
@@ -19,14 +20,17 @@ export default function App() {
     models, selectedModel, npmScripts, selectedScript,
     gitBranch, gitBranches, gitBusy, newBranchMode, newBranchName,
     selectedPrompt, selectedScope, scopeFolders, activeFile, workspaceRoot, input,
+    customPrompts, newPromptMode,
+    scheduledTasks, calendarOpen,
   } = state
 
   const t = getStrings(locale)
-  const quickPrompts = [
+  const builtinPrompts = [
     { key: 'refactor', label: t.quickRefactorLabel, text: t.quickRefactorPrompt },
     { key: 'tests',    label: t.quickTestsLabel,    text: t.quickTestsPrompt },
     { key: 'fix',      label: t.quickFixLabel,      text: t.quickFixPrompt },
   ]
+  const allQuickPrompts = [...builtinPrompts, ...customPrompts]
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -131,6 +135,15 @@ export default function App() {
         case 'picked-element':
           if (msg.data) dispatch({ type: 'SET_PICKED_ELEMENT', element: msg.data })
           break
+        case 'custom-prompts':
+          if (Array.isArray(msg.prompts)) dispatch({ type: 'SET_CUSTOM_PROMPTS', prompts: msg.prompts })
+          break
+        case 'scheduled-tasks':
+          if (Array.isArray(msg.tasks)) dispatch({ type: 'SET_SCHEDULED_TASKS', tasks: msg.tasks })
+          break
+        case 'patch-last-message':
+          if (typeof msg.text === 'string') dispatch({ type: 'PATCH_LAST_MESSAGE', text: msg.text })
+          break
       }
     }
 
@@ -162,7 +175,7 @@ export default function App() {
       type: 'send',
       payload: {
         text: fullText,
-        modelId: selectedModel !== 'default' ? selectedModel : undefined,
+        modelId: selectedModel !== 'auto' ? selectedModel : undefined,
         conversationId: 'default',
         context: { taskKind: pickedElement ? 'preview' : 'chat' },
       },
@@ -181,7 +194,7 @@ export default function App() {
   }
 
   const sendQuickPrompt = () => {
-    const prompt = quickPrompts.find(p => p.key === selectedPrompt)
+    const prompt = allQuickPrompts.find(p => p.key === selectedPrompt)
     if (!prompt || isStreaming) return
 
     let scopeSuffix = ''
@@ -189,16 +202,26 @@ export default function App() {
     else if (selectedScope === 'project') scopeSuffix = t.scopePromptProject
     else if (selectedScope.startsWith('folder:')) scopeSuffix = t.scopePromptFolder(selectedScope.slice(7))
 
-    dispatch({ type: 'QUICK_PROMPT_SENT', label: `[${prompt.label}]` })
-    vscode.postMessage({
-      type: 'send',
-      payload: {
-        text: prompt.text + scopeSuffix,
-        modelId: selectedModel !== 'default' ? selectedModel : undefined,
-        conversationId: 'default',
-        context: { taskKind: 'chat' },
-      },
-    })
+    dispatch({ type: 'SET_INPUT', value: prompt.text + scopeSuffix })
+    setTimeout(() => {
+      textareaRef.current?.focus()
+      const len = textareaRef.current?.value.length ?? 0
+      textareaRef.current?.setSelectionRange(len, len)
+    }, 0)
+  }
+
+  const scheduleQuickPrompt = (scheduledAt: string) => {
+    const prompt = allQuickPrompts.find(p => p.key === selectedPrompt)
+    if (!prompt || isStreaming) return
+
+    let scopeSuffix = ''
+    if (selectedScope === 'file') scopeSuffix = activeFile ? t.scopePromptFile(activeFile) : ''
+    else if (selectedScope === 'project') scopeSuffix = t.scopePromptProject
+    else if (selectedScope.startsWith('folder:')) scopeSuffix = t.scopePromptFolder(selectedScope.slice(7))
+
+    vscode.postMessage({ type: 'schedule-prompt', text: prompt.text + scopeSuffix, scheduledAt: new Date(scheduledAt).getTime() })
+    const formatted = new Date(scheduledAt).toLocaleString()
+    dispatch({ type: 'ADD_MESSAGE', id: `scheduled-${Date.now()}`, text: t.scheduleConfirm(formatted) })
   }
 
   const gitOp = (op: 'add' | 'commit' | 'push') => {
@@ -242,13 +265,23 @@ export default function App() {
           selectedScope={selectedScope}
           onScopeChange={scope => dispatch({ type: 'SET_SELECTED_SCOPE', scope })}
           activeFile={activeFile}
-          quickPrompts={quickPrompts}
+          quickPrompts={allQuickPrompts}
           selectedPrompt={selectedPrompt}
-          onPromptChange={key => dispatch({ type: 'SET_SELECTED_PROMPT', key })}
+          onPromptChange={key => {
+            if (key === '__new__') { dispatch({ type: 'SET_NEW_PROMPT_MODE', active: true }); return }
+            dispatch({ type: 'SET_SELECTED_PROMPT', key })
+          }}
           isStreaming={isStreaming}
           onSendQuickPrompt={sendQuickPrompt}
+          onSchedulePrompt={scheduleQuickPrompt}
           onOpenPreview={() => vscode.postMessage({ type: 'command', command: 'kludge.openPreview' })}
           onNewChat={newChat}
+          newPromptMode={newPromptMode}
+          onSaveNewPrompt={(label, text) => {
+            vscode.postMessage({ type: 'save-custom-prompt', label, text })
+            dispatch({ type: 'SET_NEW_PROMPT_MODE', active: false })
+          }}
+          onCancelNewPrompt={() => dispatch({ type: 'SET_NEW_PROMPT_MODE', active: false })}
           t={t}
         />
 
@@ -264,7 +297,6 @@ export default function App() {
               dispatch({ type: 'ADD_MESSAGE', id: `npm-${Date.now()}`, text: t.msgNpmStarted(cmd) })
             }
           }}
-          t={t}
         />
 
         <GitPanel
@@ -289,6 +321,19 @@ export default function App() {
           onGitOp={gitOp}
           t={t}
         />
+
+        <button
+          style={{ ...styles.iconButton, alignSelf: 'flex-start', fontSize: 11, opacity: calendarOpen ? 1 : 0.6 }}
+          onClick={() => dispatch({ type: 'TOGGLE_CALENDAR' })}
+        >{t.calendarToggle}{scheduledTasks.length > 0 && ` (${scheduledTasks.length})`}</button>
+
+        {calendarOpen && (
+          <ScheduleCalendar
+            tasks={scheduledTasks}
+            onCancel={id => { vscode.postMessage({ type: 'cancel-scheduled-task', id }) }}
+            t={t}
+          />
+        )}
 
         {!workspaceRoot && (
           <div style={styles.noWorkspaceHint}>{t.noWorkspaceHint}</div>

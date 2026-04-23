@@ -25,4 +25,17 @@ export interface FolderItem {
   depth: number
 }
 
+export interface ScheduledTaskInfo {
+  id: string
+  text: string
+  scheduledAt: number
+  completedAt?: number
+}
+
+export interface CustomPrompt {
+  key: string
+  label: string
+  text: string
+}
+
 export const STREAMING_ID = '__streaming__'

@@ -8,6 +8,20 @@ import { ChatProvider } from './chatProvider';
 import { ChatOrchestrator, HistoryService, TelegramService, PreviewPanel } from './services';
 import { ChatRequest } from './types';
 
+const _TG_CMD_RE = /<vscode-cmd>([\s\S]*?)<\/vscode-cmd>/g;
+function extractTgCmds(text: string): Array<Record<string, any>> {
+  const cmds: Array<Record<string, any>> = [];
+  let m: RegExpExecArray | null;
+  _TG_CMD_RE.lastIndex = 0;
+  while ((m = _TG_CMD_RE.exec(text)) !== null) {
+    try { cmds.push(JSON.parse(m[1])); } catch {}
+  }
+  return cmds;
+}
+function stripTgCmds(text: string): string {
+  return text.replace(/<vscode-cmd>[\s\S]*?<\/vscode-cmd>/g, '').trim();
+}
+
 async function listWorkspaceFiles(): Promise<string[]> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders?.length) { return []; }
@@ -45,7 +59,8 @@ function buildRequestContext(
 export async function activate(context: vscode.ExtensionContext) {
   const historyService = new HistoryService(context.globalState);
   const orchestrator = new ChatOrchestrator(historyService);
-  const provider = new ChatProvider(context.extensionUri, orchestrator);
+  const provider = new ChatProvider(context.extensionUri, context.globalState, orchestrator);
+  void provider.restoreScheduledTasks();
   const preview = new PreviewPanel();
 
   // ── инициализируем провайдеры из .env ────────────────────────────────
@@ -119,7 +134,8 @@ export async function activate(context: vscode.ExtensionContext) {
           { id: `tg-${Date.now()}`, role: 'user', content: text, createdAt: Date.now() }
         ],
         context: buildRequestContext('chat', { workspaceFiles }),
-        modelId: 'default'
+        modelId: 'default',
+        systemExtra: provider.getScheduledContext(),
       };
 
       provider.postMessage({
@@ -130,6 +146,7 @@ export async function activate(context: vscode.ExtensionContext) {
       });
 
       let fullResponse = '';
+      const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 
       provider.postMessage({ type: 'stream-start', conversationId: request.conversationId });
 
@@ -138,10 +155,20 @@ export async function activate(context: vscode.ExtensionContext) {
         provider.postMessage({ type: 'delta', delta, conversationId: request.conversationId });
       });
 
-      provider.postMessage({ type: 'done', conversationId: request.conversationId });
+      const cmds = extractTgCmds(fullResponse);
+      const clean = stripTgCmds(fullResponse);
 
-      if (fullResponse) {
-        await telegram.send(fullResponse).catch(e => console.error('[Kludge] Telegram send error:', e));
+      provider.postMessage({ type: 'done', conversationId: request.conversationId });
+      if (cmds.length > 0) {
+        provider.postMessage({ type: 'patch-last-message', text: clean });
+      }
+
+      if (clean) {
+        await telegram.send(clean).catch(e => console.error('[Kludge] Telegram send error:', e));
+      }
+
+      if (cmds.length > 0) {
+        void provider.executeVscodeCmds(cmds, folder);
       }
     });
 

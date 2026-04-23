@@ -35,6 +35,24 @@
         "id": "kludge.chatView",
         "name": "Chat"
       }]
+    },
+    "configuration": {
+      "title": "Kludge Code",
+      "properties": {
+        "kludge.customPrompts": {
+          "type": "array",
+          "default": [],
+          "description": "Custom quick prompts shown in the action dropdown.",
+          "items": {
+            "type": "object",
+            "required": ["label", "text"],
+            "properties": {
+              "label": { "type": "string", "description": "Short action name shown in the dropdown." },
+              "text":  { "type": "string", "description": "Prompt text sent to the model." }
+            }
+          }
+        }
+      }
     }
   },
   "scripts": {

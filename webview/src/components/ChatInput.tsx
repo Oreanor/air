@@ -5,7 +5,7 @@ import { styles } from '../styles'
 interface Props {
   input: string
   isStreaming: boolean
-  textareaRef: React.RefObject<HTMLTextAreaElement> | null
+  textareaRef: React.RefObject<HTMLTextAreaElement | null> | null
   onChange: (value: string) => void
   onKeyDown: (e: React.KeyboardEvent) => void
   onSend: () => void

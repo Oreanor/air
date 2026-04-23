@@ -1,5 +1,4 @@
 import React from 'react'
-import { I18n } from '../i18n'
 import { styles } from '../styles'
 
 interface Props {
@@ -8,11 +7,11 @@ interface Props {
   selectedScript: string
   onScriptChange: (script: string) => void
   onRun: () => void
-  t: I18n
 }
 
 export default function NpmPanel({ workspaceRoot, npmScripts, selectedScript, onScriptChange, onRun }: Props) {
-  const rowStyle = !workspaceRoot ? { ...styles.toolRow, opacity: 0.4 } : styles.toolRow
+  const baseStyle = { ...styles.toolRow, borderTop: '1px solid var(--vscode-panel-border)', paddingTop: 6 }
+  const rowStyle = !workspaceRoot ? { ...baseStyle, opacity: 0.4 } : baseStyle
 
   return (
     <div style={rowStyle}>

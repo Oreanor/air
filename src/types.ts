@@ -63,6 +63,7 @@ export interface ChatRequest {
   messages: ChatMessage[];
   context: ChatContext;
   modelId: string;
+  systemExtra?: string;
 }
 
 export interface EditRequest {
@@ -134,14 +135,13 @@ export interface AgentTask {
   status: 'queued' | 'running' | 'done' | 'failed';
 }
 
-/**
- * Состояние разговора: минимальный контекст для API.
- * - summary: краткое резюме всей предыдущей переписки
- * - lastUserMessage: только последнее сообщение пользователя
- * - fileCache: файлы хранятся отдельно, НЕ в истории; ключ = путь к файлу
- */
+export interface ConversationTurn {
+  user: string;
+  assistant: string;
+}
+
 export interface ConversationState {
-  summary: string;
+  turns: ConversationTurn[];
   lastUserMessage: ChatMessage | null;
   /** path → content, загружается по запросу, не шлётся в API автоматически */
   fileCache: Record<string, string>;

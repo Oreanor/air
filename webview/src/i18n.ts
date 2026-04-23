@@ -41,6 +41,17 @@ export interface I18n {
   codeLinesLabel: (n: number) => string
   codeCopyBtn: string
   removeElement: string
+  newPromptOption: string
+  newPromptLabelPlaceholder: string
+  newPromptBoilerplate: string
+  newPromptSave: string
+  newPromptCancel: string
+  modeAction: string
+  modeTask: string
+  scheduleConfirm: (dt: string) => string
+  calendarToggle: string
+  calendarNoTasks: string
+  calendarWeekdays: string[]
 }
 
 const en: I18n = {
@@ -86,6 +97,17 @@ const en: I18n = {
   codeLinesLabel: n => `${n} lines`,
   codeCopyBtn: 'copy',
   removeElement: 'Remove',
+  newPromptOption: '＋ New action…',
+  newPromptLabelPlaceholder: 'Action name, e.g. "Security audit"',
+  newPromptBoilerplate: 'Check the open file for [describe what to look for, e.g. "security issues"]. For each finding explain why it is a problem and show a fix. Do not change code unrelated to the task.',
+  newPromptSave: 'Save',
+  newPromptCancel: 'Cancel',
+  modeAction: 'Permanent',
+  modeTask: 'One-time',
+  scheduleConfirm: dt => `⏰ Scheduled for ${dt}`,
+  calendarToggle: '📅 Schedule',
+  calendarNoTasks: 'No tasks for this day',
+  calendarWeekdays: ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'],
 }
 
 const ru: I18n = {
@@ -131,6 +153,17 @@ const ru: I18n = {
   codeLinesLabel: n => `${n} строк`,
   codeCopyBtn: 'копировать',
   removeElement: 'Убрать',
+  newPromptOption: '＋ Новое действие…',
+  newPromptLabelPlaceholder: 'Название действия, напр. «Аудит безопасности»',
+  newPromptBoilerplate: 'Проверь открытый файл на [опиши что искать, напр. «уязвимости»]. Для каждой находки объясни в чём проблема и покажи исправление. Не трогай код, не относящийся к задаче.',
+  newPromptSave: 'Сохранить',
+  newPromptCancel: 'Отмена',
+  modeAction: 'Постоянный',
+  modeTask: 'Одноразовый',
+  scheduleConfirm: dt => `⏰ Запланировано на ${dt}`,
+  calendarToggle: '📅 Расписание',
+  calendarNoTasks: 'Задач нет',
+  calendarWeekdays: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
 }
 
 const pt: I18n = {
@@ -176,6 +209,17 @@ const pt: I18n = {
   codeLinesLabel: n => `${n} linhas`,
   codeCopyBtn: 'copiar',
   removeElement: 'Remover',
+  newPromptOption: '＋ Nova ação…',
+  newPromptLabelPlaceholder: 'Nome da ação, ex. "Auditoria de segurança"',
+  newPromptBoilerplate: 'Verifique o arquivo aberto em busca de [descreva o que procurar, ex. "vulnerabilidades"]. Para cada achado, explique o problema e mostre a correção. Não altere código não relacionado à tarefa.',
+  newPromptSave: 'Salvar',
+  newPromptCancel: 'Cancelar',
+  modeAction: 'Permanente',
+  modeTask: 'Único',
+  scheduleConfirm: dt => `⏰ Agendado para ${dt}`,
+  calendarToggle: '📅 Agenda',
+  calendarNoTasks: 'Sem tarefas neste dia',
+  calendarWeekdays: ['Se', 'Te', 'Qu', 'Qu', 'Se', 'Sá', 'Do'],
 }
 
 export function getStrings(locale: string): I18n {

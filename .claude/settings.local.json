@@ -5,7 +5,8 @@
       "Bash(sed -i 's/AIR:/Kludge:/g; s/AIR Agent/Kludge Agent/g' c:/work/air/src/services/agentTools.ts)",
       "Bash(sed -i 's/расширение AIR/расширение Kludge Code/g; s/\\\\[AIR\\\\]/[Kludge]/g' c:/work/air/src/services/chatOrchestrator.ts)",
       "Bash(sed -i 's/\\\\[AIR Proxy\\\\]/[Kludge Proxy]/g; s/\\\\[AIR\\\\]/[Kludge]/g' c:/work/air/src/services/proxyService.ts)",
-      "Bash(sed -i 's/\\\\[AIR\\\\]/[Kludge]/g' c:/work/air/src/services/telegramService.ts)"
+      "Bash(sed -i 's/\\\\[AIR\\\\]/[Kludge]/g' c:/work/air/src/services/telegramService.ts)",
+      "Bash(npx tsc *)"
     ]
   }
 }

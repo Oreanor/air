@@ -3,7 +3,7 @@ import * as https from 'https';
 export class TelegramService {
   private offset = 0;
   private _running = false;
-  private _onIncoming?: (text: string, from: string) => void;
+  private _onIncoming?: (text: string, from: string) => Promise<void>;
   private _retryDelay = 1000;
   private _maxRetryDelay = 30_000;
 
@@ -28,7 +28,7 @@ export class TelegramService {
 
   // ── запустить long-polling ────────────────────────────────────────────
 
-  startPolling(onIncoming: (text: string, from: string) => void): void {
+  startPolling(onIncoming: (text: string, from: string) => Promise<void>): void {
     if (this._running) { return; }
     this._onIncoming = onIncoming;
     this._running = true;
@@ -63,8 +63,11 @@ export class TelegramService {
               ? `@${update.message.from.username}`
               : (update.message?.from?.first_name ?? 'unknown');
           if (text && this._onIncoming) {
-            // не блокируем polling цикл — запускаем обработчик асинхронно
-            void Promise.resolve().then(() => this._onIncoming!(text, from));
+            try {
+              await this._onIncoming(text, from);
+            } catch (e: any) {
+              console.error('[Kludge] Telegram handler error:', e?.message ?? e);
+            }
           }
         }
       } catch (e: any) {

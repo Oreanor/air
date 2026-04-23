@@ -1,4 +1,4 @@
-import { Message, PickedElement, ModelOption, FolderItem, STREAMING_ID } from '../types'
+import { Message, PickedElement, ModelOption, FolderItem, CustomPrompt, ScheduledTaskInfo, STREAMING_ID } from '../types'
 
 export interface AppState {
   messages: Message[]
@@ -20,6 +20,10 @@ export interface AppState {
   activeFile: string | null
   workspaceRoot: string | null
   input: string
+  customPrompts: CustomPrompt[]
+  newPromptMode: boolean
+  scheduledTasks: ScheduledTaskInfo[]
+  calendarOpen: boolean
 }
 
 export type AppAction =
@@ -51,6 +55,11 @@ export type AppAction =
   | { type: 'ADD_MESSAGE'; id: string; text: string }
   | { type: 'UPDATE_OR_ADD_MESSAGE'; id: string; text: string }
   | { type: 'HISTORY_LOADED'; messages: Message[] }
+  | { type: 'SET_CUSTOM_PROMPTS'; prompts: CustomPrompt[] }
+  | { type: 'SET_NEW_PROMPT_MODE'; active: boolean }
+  | { type: 'SET_SCHEDULED_TASKS'; tasks: ScheduledTaskInfo[] }
+  | { type: 'TOGGLE_CALENDAR' }
+  | { type: 'PATCH_LAST_MESSAGE'; text: string }
 
 export const initialState: AppState = {
   messages: [],
@@ -72,6 +81,10 @@ export const initialState: AppState = {
   activeFile: null,
   workspaceRoot: null,
   input: '',
+  customPrompts: [],
+  newPromptMode: false,
+  scheduledTasks: [],
+  calendarOpen: false,
 }
 
 export function reducer(state: AppState, action: AppAction): AppState {
@@ -210,6 +223,19 @@ export function reducer(state: AppState, action: AppAction): AppState {
     case 'HISTORY_LOADED':
       if (action.messages.length === 0) return state
       return { ...state, messages: action.messages }
+
+    case 'SET_CUSTOM_PROMPTS': return { ...state, customPrompts: action.prompts }
+    case 'SET_NEW_PROMPT_MODE': return { ...state, newPromptMode: action.active }
+    case 'SET_SCHEDULED_TASKS': return { ...state, scheduledTasks: action.tasks }
+    case 'TOGGLE_CALENDAR': return { ...state, calendarOpen: !state.calendarOpen }
+    case 'PATCH_LAST_MESSAGE': {
+      const idx = [...state.messages].map((m, i) => ({ m, i })).reverse()
+        .find(({ m }) => m.role === 'assistant' && m.id !== STREAMING_ID)?.i ?? -1
+      if (idx === -1) { return state }
+      const next = [...state.messages]
+      next[idx] = { ...next[idx], text: action.text }
+      return { ...state, messages: next }
+    }
 
     default:
       return state
