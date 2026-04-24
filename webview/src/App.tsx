@@ -11,6 +11,7 @@ import ElementChip from './components/ElementChip'
 import ScheduleCalendar from './components/ScheduleCalendar'
 import ProvidersPanel from './components/ProvidersPanel'
 import ModelBar from './components/ModelBar'
+import SessionTabs from './components/SessionTabs'
 
 declare const acquireVsCodeApi: () => { postMessage: (msg: unknown) => void }
 const vscode = acquireVsCodeApi()
@@ -18,6 +19,7 @@ const vscode = acquireVsCodeApi()
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
   const {
+    sessions, activeSessionId, busySessionId,
     messages, isStreaming, pickedElement, locale,
     models, disabledProviders, selectedModel, npmScripts, selectedScript,
     gitBranch, gitBranches, gitBusy, newBranchMode, newBranchName,
@@ -155,6 +157,16 @@ export default function App() {
         case 'providers':
           if (Array.isArray(msg.providers)) dispatch({ type: 'SET_PROVIDERS', providers: msg.providers, disabledProviders: Array.isArray(msg.disabledProviders) ? msg.disabledProviders : undefined })
           break
+        case 'sessions':
+          if (Array.isArray(msg.sessions)) {
+            dispatch({ type: 'SET_SESSIONS', sessions: msg.sessions })
+            if (msg.activeSessionId) dispatch({ type: 'SWITCH_SESSION', sessionId: msg.activeSessionId })
+            dispatch({ type: 'SET_BUSY_SESSION', sessionId: msg.busySessionId ?? null })
+          }
+          break
+        case 'session-busy':
+          dispatch({ type: 'SET_BUSY_SESSION', sessionId: msg.workingSession?.id ?? null })
+          break
         case 'patch-last-message':
           if (typeof msg.text === 'string') dispatch({ type: 'PATCH_LAST_MESSAGE', text: msg.text })
           break
@@ -190,8 +202,8 @@ export default function App() {
       payload: {
         text: fullText,
         modelId: selectedModel !== 'auto' ? selectedModel : undefined,
-        conversationId: 'default',
-        context: { taskKind: pickedElement ? 'preview' : 'chat' },
+        conversationId: activeSessionId,
+        context: { taskKind: pickedElement ? 'preview' : 'chat', activeFile: activeFile ?? undefined },
       },
     })
   }
@@ -247,12 +259,32 @@ export default function App() {
 
   const newChat = () => {
     dispatch({ type: 'CLEAR_MESSAGES' })
-    vscode.postMessage({ type: 'clear-history', conversationId: 'default' })
+    vscode.postMessage({ type: 'clear-history', conversationId: activeSessionId })
+  }
+
+  const switchSession = (id: string) => {
+    if (id === activeSessionId) { return }
+    dispatch({ type: 'SWITCH_SESSION', sessionId: id })
+    vscode.postMessage({ type: 'switch-session', sessionId: id })
   }
 
   return (
     <div style={styles.root}>
+      <SessionTabs
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        busySessionId={busySessionId}
+        onSwitch={switchSession}
+        onNew={() => vscode.postMessage({ type: 'new-session' })}
+        onClose={id => vscode.postMessage({ type: 'close-session', sessionId: id })}
+      />
       <ChatMessages messages={messages} t={t} bottomRef={bottomRef} />
+
+      {busySessionId && busySessionId !== activeSessionId && (
+        <div style={styles.sessionBusyBanner}>
+          {t.sessionBusyWarning(sessions.find(s => s.id === busySessionId)?.name ?? busySessionId)}
+        </div>
+      )}
 
       <div style={styles.inputRow}>
 

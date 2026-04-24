@@ -59,6 +59,7 @@ export interface I18n {
   calendarToggle: string
   calendarNoTasks: string
   calendarWeekdays: string[]
+  sessionBusyWarning: (name: string) => string
   providersToggle: string
   providerSave: string
   providerRemove: string
@@ -127,6 +128,7 @@ const en: I18n = {
   calendarToggle: '📅 Schedule',
   calendarNoTasks: 'No tasks for this day',
   calendarWeekdays: ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'],
+  sessionBusyWarning: name => `⚠ "${name}" is working — sending now may cause conflicts`,
   providersToggle: '🔑 Keys',
   providerSave: 'Save',
   providerRemove: 'Remove',
@@ -195,6 +197,7 @@ const ru: I18n = {
   calendarToggle: '📅 Расписание',
   calendarNoTasks: 'Задач нет',
   calendarWeekdays: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
+  sessionBusyWarning: name => `⚠ «${name}» работает — отправка сейчас может вызвать конфликты`,
   providersToggle: '🔑 Ключи',
   providerSave: 'Сохранить',
   providerRemove: 'Убрать',
@@ -263,6 +266,7 @@ const pt: I18n = {
   calendarToggle: '📅 Agenda',
   calendarNoTasks: 'Sem tarefas neste dia',
   calendarWeekdays: ['Se', 'Te', 'Qu', 'Qu', 'Se', 'Sá', 'Do'],
+  sessionBusyWarning: name => `⚠ "${name}" está trabalhando — enviar agora pode causar conflitos`,
   providersToggle: '🔑 Chaves',
   providerSave: 'Salvar',
   providerRemove: 'Remover',

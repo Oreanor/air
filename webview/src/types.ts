@@ -48,4 +48,10 @@ export interface ProviderInfo {
   placeholder?: string
 }
 
+export interface Session {
+  id: string
+  name: string
+  createdAt: number
+}
+
 export const STREAMING_ID = '__streaming__'

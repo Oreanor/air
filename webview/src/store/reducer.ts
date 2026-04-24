@@ -1,6 +1,9 @@
-import { Message, PickedElement, ModelOption, FolderItem, CustomPrompt, ScheduledTaskInfo, ProviderInfo, STREAMING_ID } from '../types'
+import { Message, PickedElement, ModelOption, FolderItem, CustomPrompt, ScheduledTaskInfo, ProviderInfo, Session, STREAMING_ID } from '../types'
 
 export interface AppState {
+  sessions: Session[]
+  activeSessionId: string
+  busySessionId: string | null
   messages: Message[]
   isStreaming: boolean
   pickedElement: PickedElement | null
@@ -33,6 +36,9 @@ export type AppAction =
   | { type: 'SET_LOCALE'; locale: string }
   | { type: 'SET_MODELS'; models: ModelOption[]; disabledProviders?: string[] }
   | { type: 'SET_PROVIDERS'; providers: ProviderInfo[]; disabledProviders?: string[] }
+  | { type: 'SET_SESSIONS'; sessions: Session[] }
+  | { type: 'SWITCH_SESSION'; sessionId: string }
+  | { type: 'SET_BUSY_SESSION'; sessionId: string | null }
   | { type: 'SET_MODEL'; modelId: string }
   | { type: 'SET_NPM_SCRIPTS'; scripts: string[] }
   | { type: 'SET_SELECTED_SCRIPT'; script: string }
@@ -67,6 +73,9 @@ export type AppAction =
   | { type: 'TOGGLE_PROVIDERS' }
 
 export const initialState: AppState = {
+  sessions: [{ id: 'default', name: 'Chat 1', createdAt: 0 }],
+  activeSessionId: 'default',
+  busySessionId: null,
   messages: [],
   isStreaming: false,
   pickedElement: null,
@@ -246,6 +255,16 @@ export function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, providers: action.providers, disabledProviders: dp }
     }
     case 'TOGGLE_PROVIDERS': return { ...state, providersOpen: !state.providersOpen }
+    case 'SET_SESSIONS': return { ...state, sessions: action.sessions }
+    case 'SWITCH_SESSION':
+      if (action.sessionId === state.activeSessionId) { return state }
+      return {
+        ...state,
+        activeSessionId: action.sessionId,
+        messages: [],
+        isStreaming: false,
+      }
+    case 'SET_BUSY_SESSION': return { ...state, busySessionId: action.sessionId }
     case 'PATCH_LAST_MESSAGE': {
       const idx = [...state.messages].map((m, i) => ({ m, i })).reverse()
         .find(({ m }) => m.role === 'assistant' && m.id !== STREAMING_ID)?.i ?? -1

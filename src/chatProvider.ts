@@ -41,6 +41,12 @@ interface ScheduledTask {
 
 const SCHEDULE_KEY = 'kludge.scheduledPrompts';
 const DISABLED_PROVIDERS_KEY = 'kludge.disabledProviders';
+const SESSIONS_KEY = 'kludge.sessions';
+const ACTIVE_SESSION_KEY = 'kludge.activeSession';
+
+interface StoredSession { id: string; name: string; createdAt: number }
+
+const FILE_PATH_RE = /`([^`\s]+\.[a-zA-Z]{1,6})`/g;
 
 const PROVIDER_DEFS = [
   { id: 'gemini'     as const, name: 'Google Gemini', secretKey: 'kludge.provider.gemini'      },
@@ -64,6 +70,7 @@ export class ChatProvider implements vscode.WebviewViewProvider {
   private _git?: GitService;
   private _npm?: NpmService;
   private _softRemoved = new Set<string>(); // visually removed but key still in SecretStorage
+  private _activeWork: { sessionId: string; sessionName: string; files: Set<string> } | null = null;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -94,6 +101,7 @@ export class ChatProvider implements vscode.WebviewViewProvider {
     const sendAll = () => {
       if (!webviewView.visible) { return; }
       this._sendLocale();
+      this._sendSessions();
       this._sendHistory();
       this._sendModels();
       this._sendNpmScripts();
@@ -161,16 +169,35 @@ export class ChatProvider implements vscode.WebviewViewProvider {
     this._view.webview.postMessage({ type: 'locale', locale: vscode.env.language });
   }
 
-  private _sendHistory() {
+  private _sendHistory(conversationId?: string) {
     if (!this._view?.visible || !this.orchestrator) { return; }
+    const id = conversationId ?? this._globalState.get<string>(ACTIVE_SESSION_KEY, 'default');
     try {
-      const hist = this.orchestrator.getHistory('default');
-      if (Array.isArray(hist) && hist.length > 0) {
-        this._view.webview.postMessage({ type: 'history', conversationId: 'default', messages: hist });
-      }
+      const hist = this.orchestrator.getHistory(id);
+      this._view.webview.postMessage({ type: 'history', conversationId: id, messages: hist ?? [] });
     } catch (e) {
       console.error('[Kludge] ChatProvider: failed to send history', e);
     }
+  }
+
+  private _getSessions(): StoredSession[] {
+    const stored = this._globalState.get<StoredSession[]>(SESSIONS_KEY, []);
+    if (stored.length === 0) {
+      return [{ id: 'default', name: 'Chat 1', createdAt: Date.now() }];
+    }
+    return stored;
+  }
+
+  private async _saveSessions(sessions: StoredSession[]): Promise<void> {
+    await this._globalState.update(SESSIONS_KEY, sessions);
+  }
+
+  private _sendSessions() {
+    if (!this._view?.visible) { return; }
+    const sessions = this._getSessions();
+    const activeSessionId = this._globalState.get<string>(ACTIVE_SESSION_KEY, 'default');
+    const busySessionId = this._activeWork?.sessionId ?? null;
+    this._view.webview.postMessage({ type: 'sessions', sessions, activeSessionId, busySessionId });
   }
 
   private _sendModels() {
@@ -455,10 +482,33 @@ export class ChatProvider implements vscode.WebviewViewProvider {
           this._abortController = new AbortController();
           const signal = this._abortController.signal;
           const payload = msg.payload ?? { text: msg.text };
+          const sessionId = payload.conversationId ?? 'default';
           const workspaceFiles = await listWorkspaceFiles();
+
+          // ── work-conflict detection ──────────────────────────────────
+          if (this._activeWork && this._activeWork.sessionId !== sessionId) {
+            const overlap = payload.context?.activeFile
+              ? this._activeWork.files.has(payload.context.activeFile)
+              : false;
+            this._view?.webview.postMessage({
+              type: 'session-busy',
+              workingSession: { id: this._activeWork.sessionId, name: this._activeWork.sessionName },
+              hasFileConflict: overlap,
+            });
+          }
+
+          // ── start work tracking ──────────────────────────────────────
+          const sessions = this._getSessions();
+          const session = sessions.find(s => s.id === sessionId);
+          const touchedFiles = new Set<string>(
+            [payload.context?.activeFile].filter(Boolean) as string[]
+          );
+          this._activeWork = { sessionId, sessionName: session?.name ?? sessionId, files: touchedFiles };
+          this._sendSessions();
+
           const request: ChatRequest = payload.text
             ? {
-                conversationId: payload.conversationId ?? 'default',
+                conversationId: sessionId,
                 messages: [{ id: `user-${Date.now()}`, role: 'user', content: payload.text, createdAt: Date.now() }],
                 context: { ...(payload.context ?? { taskKind: 'chat' }), workspaceFiles },
                 modelId: payload.modelId ?? 'default',
@@ -473,7 +523,15 @@ export class ChatProvider implements vscode.WebviewViewProvider {
               let assembled = '';
               await this.orchestrator.streamChatResponse(request, delta => {
                 assembled += delta;
-                if (!signal.aborted) { this._view?.webview.postMessage({ type: 'delta', delta }); }
+                if (!signal.aborted) {
+                  // accumulate file paths mentioned in response
+                  let m: RegExpExecArray | null;
+                  FILE_PATH_RE.lastIndex = 0;
+                  while ((m = FILE_PATH_RE.exec(delta)) !== null) {
+                    this._activeWork?.files.add(m[1]);
+                  }
+                  this._view?.webview.postMessage({ type: 'delta', delta });
+                }
               }, signal);
               if (!signal.aborted) {
                 await this._processAssembled(assembled, folder ?? '');
@@ -485,8 +543,14 @@ export class ChatProvider implements vscode.WebviewViewProvider {
               } else {
                 throw e;
               }
+            } finally {
+              if (this._activeWork?.sessionId === sessionId) {
+                this._activeWork = null;
+                this._sendSessions();
+              }
             }
           } else {
+            this._activeWork = null;
             this._view?.webview.postMessage({ type: 'response', text: `Echo: ${msg.text ?? JSON.stringify(msg.payload)}` });
           }
           break;
@@ -496,6 +560,42 @@ export class ChatProvider implements vscode.WebviewViewProvider {
           this._abortController?.abort();
           this._view?.webview.postMessage({ type: 'stopped' });
           break;
+
+        case 'new-session': {
+          const sessions = this._getSessions();
+          const num = sessions.length + 1;
+          const newSession: StoredSession = { id: `s-${Date.now()}`, name: `Chat ${num}`, createdAt: Date.now() };
+          const updated = [...sessions, newSession];
+          await this._saveSessions(updated);
+          await this._globalState.update(ACTIVE_SESSION_KEY, newSession.id);
+          this._sendSessions();
+          this._sendHistory(newSession.id);
+          break;
+        }
+
+        case 'switch-session': {
+          const sid = String(msg.sessionId ?? 'default');
+          await this._globalState.update(ACTIVE_SESSION_KEY, sid);
+          this._sendSessions();
+          this._sendHistory(sid);
+          break;
+        }
+
+        case 'close-session': {
+          const sid = String(msg.sessionId ?? '');
+          if (!sid || sid === 'default') { break; }
+          const sessions = this._getSessions().filter(s => s.id !== sid);
+          if (sessions.length === 0) { break; }
+          await this._saveSessions(sessions);
+          const currentActive = this._globalState.get<string>(ACTIVE_SESSION_KEY, 'default');
+          const nextActive = currentActive === sid ? sessions[sessions.length - 1].id : currentActive;
+          await this._globalState.update(ACTIVE_SESSION_KEY, nextActive);
+          // clean up history for closed session
+          await this.orchestrator?.clearHistory(sid);
+          this._sendSessions();
+          if (currentActive === sid) { this._sendHistory(nextActive); }
+          break;
+        }
 
         case 'command':
           vscode.commands.executeCommand(msg.command);
@@ -538,9 +638,11 @@ export class ChatProvider implements vscode.WebviewViewProvider {
           if (folder) { this._npm?.run(msg.script ?? '', folder); }
           break;
 
-        case 'clear-history':
-          await this.orchestrator?.clearHistory(msg.conversationId ?? 'default');
+        case 'clear-history': {
+          const cid = msg.conversationId ?? this._globalState.get<string>(ACTIVE_SESSION_KEY, 'default');
+          await this.orchestrator?.clearHistory(cid);
           break;
+        }
 
         case 'schedule-prompt': {
           const task: ScheduledTask = {
